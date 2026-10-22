@@ -44,10 +44,13 @@ def day_url(cfg, d: date, template: str) -> str:
     return f"{base}/{d.year}/{d:%j}/{template.format(ymd=f'{d:%Y%m%d}')}"
 
 
-def _fetch(url: str, dest: Path, retries: int) -> bool:
-    """Download url to dest, resuming a partial file between attempts."""
+def _fetch(url: str, dest: Path, retries: int, resume: bool = True) -> bool:
+    """Download url to dest. With resume, a partial file is continued between attempts
+    (file server only; ERDDAP responses are generated on the fly and always restart)."""
     for attempt in range(1, retries + 1):
         try:
+            if not resume:
+                dest.unlink(missing_ok=True)
             have = dest.stat().st_size if dest.exists() else 0
             req = urllib.request.Request(url, headers={"Range": f"bytes={have}-"} if have else {})
             with urllib.request.urlopen(req, timeout=120) as r:
@@ -65,8 +68,16 @@ def _fetch(url: str, dest: Path, retries: int) -> bool:
             return dest.stat().st_size > 0
         except Exception as exc:                      # 404, timeouts, resets
             code = getattr(exc, "code", None)
-            if code == 416:                           # range past EOF: already complete
+            if resume and code == 416:                # range past EOF: already complete
                 return dest.exists() and dest.stat().st_size > 0
+            detail = ""
+            if hasattr(exc, "read"):
+                try:
+                    detail = exc.read(300).decode("utf-8", "replace").replace("\n", " ")
+                except Exception:
+                    pass
+            print(f"    fetch attempt {attempt}/{retries} failed: {exc!r} {detail}\n"
+                  f"      {url[:140]}", flush=True)
             if code == 404:
                 dest.unlink(missing_ok=True)
                 return False
@@ -168,7 +179,7 @@ def download_day_erddap(cfg, d: date) -> str:
         try:
             for k, (lo, hi) in enumerate(segs):
                 f = tmp_dir / f"erddap_{grid.name}_{d:%Y%m%d}_{k}.nc"
-                if not _fetch(erddap_url(cfg, d, lat_lo, lat_hi, lo, hi), f, retries):
+                if not _fetch(erddap_url(cfg, d, lat_lo, lat_hi, lo, hi), f, retries, resume=False):
                     return "fail"
                 files.append(f)
             with _HDF_LOCK:
@@ -193,7 +204,10 @@ def download_day(cfg, d: date) -> str:
             and out_zoom.exists() and out_zoom.stat().st_size > 0):
         return "skip"
     if str(cfg.sat.get("source", "erddap")).lower() == "erddap":
-        return download_day_erddap(cfg, d)
+        r = download_day_erddap(cfg, d)
+        if r == "ok" or not cfg.sat.get("fallback_to_files", True):
+            return r
+        print(f"  {d:%Y%m%d}: ERDDAP failed, falling back to the global file.", flush=True)
     tmp_dir = cfg.obs_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     raw = tmp_dir / f"raw_{d:%Y%m%d}.nc"

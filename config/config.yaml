@@ -89,6 +89,7 @@ satellite:
   source: erddap
   erddap_url: https://coastwatch.noaa.gov/erddap/griddap
   erddap_dataset: noaacwLEOACSPOSSTL3SCDaily
+  fallback_to_files: true       # if ERDDAP fails for a day, use the global file instead
   base_url: https://coastwatch.noaa.gov/pub/socd2/coastwatch/sst/ran/l3s/leo/daily
   # {ymd} = YYYYMMDD ; versions tried in order
   file_templates:
