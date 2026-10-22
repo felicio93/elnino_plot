@@ -89,7 +89,7 @@ def _fetch(url: str, dest: Path, retries: int, resume: bool = True,
             if code == 404:
                 dest.unlink(missing_ok=True)
                 return False
-            if code in (429, 503):                    # rate limited / busy: back off, don't give up early
+            if code in (429, 502, 503, 504):             # rate limited / server overloaded: back off
                 ra = getattr(exc, "headers", None) and exc.headers.get("Retry-After")
                 wait = int(ra) if ra and str(ra).isdigit() else min(600, 60 * attempt)
                 wait = min(600, wait) * (0.8 + 0.4 * random.random())
