@@ -1,5 +1,9 @@
 """NOAA/STAR ACSPO L3S-LEO-DY satellite SST: download (DTN) and load.
 
+Two sources (config satellite.source): "erddap" (default; server-side subsetting
+of dataset noaacwLEOACSPOSSTL3SCDaily, ~100 MB/day) or "files" (global 433 MB files).
+Both return identical values.
+
 Each global daily file (0.02 deg, -180..180 lon, Kelvin) is cropped and
 converted to degC on the plotting grids, and two small files are written:
 
@@ -114,12 +118,82 @@ def subset_raw(raw: Path, cfg, out_full: Path, out_zoom: Path):
         ds.close()
 
 
+def _erddap_segments(grid, pad=0.05):
+    """(lon_lo, lon_hi) segments in -180..180 covering a 0-360 grid, plus lat range."""
+    h = grid.dx / 2 + pad
+    lo, hi = grid.lon[0] - h, grid.lon[-1] + h
+    segs = []
+    if lo < 180.0:
+        segs.append((max(lo, 0.0) if lo < 0 else lo, min(hi, 179.99)))
+    if hi > 180.0:
+        segs.append((max(lo, 180.0) - 360.0, hi - 360.0))
+    lat_lo = max(grid.lat[0] - h, -89.99)
+    lat_hi = min(grid.lat[-1] + h, 89.99)
+    return segs, lat_lo, lat_hi
+
+
+def erddap_url(cfg, d: date, lat_lo, lat_hi, lon_lo, lon_hi) -> str:
+    base = cfg.sat.get("erddap_url", "https://coastwatch.noaa.gov/erddap/griddap").rstrip("/")
+    ds = cfg.sat.get("erddap_dataset", "noaacwLEOACSPOSSTL3SCDaily")
+    q = (f"sea_surface_temperature%5B({d:%Y-%m-%d}T12:00:00Z)%5D"
+         f"%5B({lat_hi:.2f}):1:({lat_lo:.2f})%5D%5B({lon_lo:.2f}):1:({lon_hi:.2f})%5D")
+    return f"{base}/{ds}.nc?{q}"
+
+
+def _read_erddap_segment(path: Path):
+    """Return (lon360, lat, sst_degC) from one ERDDAP subset file."""
+    import xarray as xr
+    ds = xr.open_dataset(str(path))
+    try:
+        v = ds["sea_surface_temperature"]
+        arr = v.isel(time=0).values.astype("float32")
+        if np.nanmean(arr) > 200.0:                      # Kelvin
+            arr = arr - 273.15
+        lon = ds["longitude"].values.astype("float64")
+        lat = ds["latitude"].values.astype("float64")
+    finally:
+        ds.close()
+    return np.where(lon < 0, lon + 360.0, lon), lat, arr
+
+
+def download_day_erddap(cfg, d: date) -> str:
+    """Download only the needed sub-rectangles from ERDDAP and bin them."""
+    out_full, out_zoom = sat_file(cfg, "full", d), sat_file(cfg, "zoom", d)
+    tmp_dir = cfg.obs_dir / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    retries = int(cfg.sat.get("retries", 3))
+    for grid, out in ((cfg.grid("full"), out_full), (cfg.grid("zoom"), out_zoom)):
+        segs, lat_lo, lat_hi = _erddap_segments(grid)
+        files = []
+        try:
+            for k, (lo, hi) in enumerate(segs):
+                f = tmp_dir / f"erddap_{grid.name}_{d:%Y%m%d}_{k}.nc"
+                if not _fetch(erddap_url(cfg, d, lat_lo, lat_hi, lo, hi), f, retries):
+                    return "fail"
+                files.append(f)
+            with _HDF_LOCK:
+                parts = [_read_erddap_segment(f) for f in files]
+                lon = np.concatenate([p[0] for p in parts])
+                lat = parts[0][1]
+                sst = np.concatenate([p[2] for p in parts], axis=1)
+                _write(out, grid, bin_to_grid(lon, lat, sst, grid))
+        except Exception as exc:
+            print(f"  {d:%Y%m%d}: erddap {grid.name} failed: {exc}", flush=True)
+            return "fail"
+        finally:
+            for f in files:
+                f.unlink(missing_ok=True)
+    return "ok"
+
+
 def download_day(cfg, d: date) -> str:
     """Download + subset one day. Returns 'ok', 'skip' or 'fail'."""
     out_full, out_zoom = sat_file(cfg, "full", d), sat_file(cfg, "zoom", d)
     if (out_full.exists() and out_full.stat().st_size > 0
             and out_zoom.exists() and out_zoom.stat().st_size > 0):
         return "skip"
+    if str(cfg.sat.get("source", "erddap")).lower() == "erddap":
+        return download_day_erddap(cfg, d)
     tmp_dir = cfg.obs_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     raw = tmp_dir / f"raw_{d:%Y%m%d}.nc"

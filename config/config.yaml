@@ -84,6 +84,11 @@ animation:
 
 # --- satellite download (run on the DTN) ----------------------------------------------
 satellite:
+  # erddap: server-side subsetting (~100 MB/day, fast); files: global 433 MB files (fallback).
+  # Both give identical values (verified against the 2023-01-01 file).
+  source: erddap
+  erddap_url: https://coastwatch.noaa.gov/erddap/griddap
+  erddap_dataset: noaacwLEOACSPOSSTL3SCDaily
   base_url: https://coastwatch.noaa.gov/pub/socd2/coastwatch/sst/ran/l3s/leo/daily
   # {ymd} = YYYYMMDD ; versions tried in order
   file_templates:
