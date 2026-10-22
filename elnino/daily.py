@@ -75,7 +75,10 @@ def run_day(cfg: Config, d: date, force: bool = False, types=None):
                 k = int(round(cfg.grid("arrows_" + region).dx / grids[region].dx))
                 u = stats.block_mean(W[region].apply(u_n), k)
                 v = stats.block_mean(W[region].apply(v_n), k)
-                arrows[region] = (cfg.grid("arrows_" + region), u, v)
+                ga = cfg.grid("arrows_" + region)
+                if u.shape != ga.shape:
+                    raise RuntimeError(f"arrow grid {ga.shape} != block-mean shape {u.shape}")
+                arrows[region] = (ga, u, v)
 
     for t in todo:
         region, with_cur = PLOT_TYPES[t]

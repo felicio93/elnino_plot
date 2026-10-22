@@ -86,10 +86,10 @@ def make_satellite(cfg: Config, days):
     cfg.obs_dir.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(2)
     for d in days:
-        for region in ("full", "zoom"):
-            g = cfg.grid(region)
+        for product, gname in (("full", "full"), ("zs", "zoomstore")):
+            g = cfg.grid(gname)
             LON, LAT = np.meshgrid(g.lon, g.lat)
             sst = true_sst(LON, LAT, d.timetuple().tm_yday) + rng.normal(0, 0.2, LON.shape)
             sst = np.where((LON > coast_lon(LAT)) & (LAT > 20) & (LAT < 55), np.nan, sst)
             sst[rng.random(sst.shape) < 0.05] = np.nan                       # cloud gaps
-            _write(cfg.obs_dir / f"leosst_{region}_{d:%Y%m%d}.nc", g, sst)
+            _write(cfg.obs_dir / f"leosst_{product}_{d:%Y%m%d}.nc", g, sst)

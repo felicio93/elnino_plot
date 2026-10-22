@@ -17,10 +17,15 @@ out_dir: /work2/noaa/nos-surge/felicioc/STOFS_Pacific/elnino2023
 # animations/ logs/
 
 # --- domain (from out2d_100.nc) --------------------------------------------------
-domain: {lon_min: 93.0, lon_max: 290.0, lat_min: -33.0, lat_max: 67.0}   # integer multiple of grid_dx_full and currents.dx_full
+domain: {lon_min: 93.0, lon_max: 290.0, lat_min: -33.0, lat_max: 67.0}
 
-# Zoomed view: top-left near Santa Maria CA, bottom-right south of Tijuana MX.
-zoom:   {lon_min: 239.5, lon_max: 243.0, lat_min: 31.5, lat_max: 35.0}
+# Zoomed view (5 deg square): top-left at Carmel-by-the-Sea (just south of Monterey Bay),
+# bottom-right south of Tijuana MX. Must lie on the 0.02 deg lattice of the zoom store.
+zoom:   {lon_min: 238.0, lon_max: 243.0, lat_min: 31.6, lat_max: 36.6}
+
+# Area of the satellite data kept on disk for zooming (native 0.02 deg). The zoom box can be
+# moved anywhere inside it without downloading again. Changing this needs a new download.
+zoom_store: {lon_min: 228.0, lon_max: 252.0, lat_min: 24.0, lat_max: 46.0}
 
 # --- regular grids used for plotting (degrees) ----------------------------------
 # Both satellite and model are put on the SAME regular grid so the panels match.
@@ -33,8 +38,7 @@ sst:
   cmap: jet
   full: {vmin: 0.0,  vmax: 32.0}
   zoom: {vmin: 12.0, vmax: 25.0}
-  isobaths_full: []             # e.g. [2000]
-  isobaths_zoom: [200]
+  isobaths: [0, 200, 2000]      # metres, drawn on every panel; 0 = coastline
   dpi: 100
   panel_width_full: 9.0         # inches per panel (height follows from domain aspect)
   panel_width_zoom: 6.0
@@ -43,15 +47,16 @@ sst:
 # --- current vectors (model panel only) --------------------------------------------
 currents:
   layer: surface
-  dx_full: 1.0                  # arrow spacing, degrees
-  dx_zoom: 0.1
+  dx_full: 3.0                  # arrow spacing, degrees (integer multiple of the grid spacing)
+  dx_zoom: 0.14
   # Arrow length (data units, deg) = speed / scale; fixed for all frames so arrow
   # size is comparable day to day. Lower scale -> longer arrows.
-  scale_full: 0.5               # 1 m/s -> 2 deg
-  scale_zoom: 3.3               # 1 m/s -> ~0.3 deg
+  scale_full: 0.3               # 1 m/s -> ~3.3 deg
+  scale_zoom: 2.4               # 1 m/s -> ~0.42 deg
   ref_speed: 0.5                # reference arrow in the legend, m/s
   color: k
-  width: 0.0014                 # shaft width, fraction of the axes width
+  width_full: 0.0018            # shaft width, fraction of the axes width
+  width_zoom: 0.0014
   min_speed: 0.0                # arrows slower than this (m/s) are not drawn
 
 # --- indices / transects used by the summary figures ------------------------------------

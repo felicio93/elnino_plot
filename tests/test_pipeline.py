@@ -33,6 +33,56 @@ def test_bin_and_blockmean():
     assert stats.block_mean(a, 2)[0, 0] == pytest.approx(2.5)
 
 
+def test_block_mean_uneven_shapes():
+    a = np.ones((10, 7), dtype="float32")
+    out = stats.block_mean(a, 3)
+    assert out.shape == (4, 3) and np.isfinite(out).all() and (out == 1).all()
+
+
+def test_arrow_grids_match_block_mean(cfg):
+    for region in ("full", "zoom"):
+        k = int(round(cfg.grid("arrows_" + region).dx / cfg.grid(region).dx))
+        b = stats.block_mean(np.zeros(cfg.grid(region).shape, dtype="float32"), k)
+        assert b.shape == cfg.grid("arrows_" + region).shape
+
+
+def test_zoom_cut_from_store(cfg):
+    from elnino.satellite import load_day
+    z = load_day(cfg, "zoom", DAYS[0])
+    assert z.shape == cfg.grid("zoom").shape
+    f = load_day(cfg, "full", DAYS[0])
+    assert f.shape == cfg.grid("full").shape
+
+
+def test_zoom_must_sit_inside_store(cfg):
+    from elnino.satellite import _cut
+    g = cfg.grid("zoomstore")
+    with pytest.raises(ValueError):
+        _cut(g.lat, g.lat + 50, g.dx)
+
+
+def test_stale_cache_detected(cfg):
+    import copy
+    raw = copy.deepcopy(cfg.raw)
+    raw["zoom"] = {"lon_min": 239.0, "lon_max": 243.0, "lat_min": 32.0, "lat_max": 36.0}
+    c2 = Config(raw)
+    with pytest.raises(RuntimeError, match="re-run"):
+        prepare.load_cache(c2)
+
+
+def test_isobath_levels_drawn(cfg):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from elnino.plotting import draw_isobaths
+    g = cfg.grid("full")
+    depth = prepare.load_cache(cfg)[1]["full"]
+    fig, ax = plt.subplots()
+    draw_isobaths(ax, g, depth, [0, 200, 2000])
+    assert len(ax.collections) >= 2          # at least coast + one isobath
+    plt.close(fig)
+
+
 def test_weights_exact_for_linear_field():
     x = np.array([0., 1., 0., 1.]); y = np.array([0., 0., 1., 1.])
     tris = mesh.split_quads(np.array([[1, 2, 4, 3]], dtype=float))

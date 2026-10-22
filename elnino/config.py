@@ -43,10 +43,16 @@ class Grid:
                 self.lat[0] - h, self.lat[-1] + h)
 
 
-def make_grid(name, box, dx):
-    """Cell-centred grid covering box = {lon_min, lon_max, lat_min, lat_max}."""
-    nx = int(round((box["lon_max"] - box["lon_min"]) / dx))
-    ny = int(round((box["lat_max"] - box["lat_min"]) / dx))
+def make_grid(name, box, dx, cover=False):
+    """Cell-centred grid over box = {lon_min, lon_max, lat_min, lat_max}.
+
+    cover=True rounds the cell count up, so the last cells may stick out of the box
+    (used for coarse arrow grids that need not divide the box evenly).
+    """
+    nx = (box["lon_max"] - box["lon_min"]) / dx
+    ny = (box["lat_max"] - box["lat_min"]) / dx
+    nx, ny = (int(np.ceil(nx - 1e-6)), int(np.ceil(ny - 1e-6))) if cover \
+        else (int(round(nx)), int(round(ny)))
     lon = box["lon_min"] + dx * (np.arange(nx) + 0.5)
     lat = box["lat_min"] + dx * (np.arange(ny) + 0.5)
     return Grid(name, lon, lat, float(dx))
@@ -71,6 +77,7 @@ class Config:
         self.plot_end = _to_date(raw["plot_end"])
         self.domain = dict(raw["domain"])
         self.zoom = dict(raw["zoom"])
+        self.zoom_store = dict(raw["zoom_store"])
         self.sst = raw["sst"]
         self.currents = raw["currents"]
         self.regions = raw["regions"]
@@ -123,10 +130,12 @@ class Config:
             return make_grid(name, self.domain, self.raw["grid_dx_full"])
         if name == "zoom":
             return make_grid(name, self.zoom, self.raw["grid_dx_zoom"])
+        if name == "zoomstore":
+            return make_grid(name, self.zoom_store, self.raw["grid_dx_zoom"])
         if name == "arrows_full":
-            return make_grid(name, self.domain, self.currents["dx_full"])
+            return make_grid(name, self.domain, self.currents["dx_full"], cover=True)
         if name == "arrows_zoom":
-            return make_grid(name, self.zoom, self.currents["dx_zoom"])
+            return make_grid(name, self.zoom, self.currents["dx_zoom"], cover=True)
         raise KeyError(name)
 
     def all_grid_names(self):

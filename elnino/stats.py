@@ -100,14 +100,23 @@ def coast_profile(model, sat, mask):
 
 
 def block_mean(a, k, min_frac=0.5):
-    """NaN-aware k x k block mean; a.shape must be divisible by k."""
+    """NaN-aware k x k block mean; the array is padded so any shape works.
+
+    Output shape is (ceil(ny/k), ceil(nx/k)). A block is valid when at least
+    min_frac of its real (non-padding) cells are finite.
+    """
     ny, nx = a.shape
-    if ny % k or nx % k:
-        raise ValueError(f"shape {a.shape} not divisible by {k}")
-    b = a.reshape(ny // k, k, nx // k, k)
+    py, px = (-ny) % k, (-nx) % k
+    real = np.ones((ny, nx), dtype=bool)
+    if py or px:
+        a = np.pad(a, ((0, py), (0, px)), constant_values=np.nan)
+        real = np.pad(real, ((0, py), (0, px)), constant_values=False)
+    NY, NX = a.shape
+    b = a.reshape(NY // k, k, NX // k, k)
     good = np.isfinite(b)
+    avail = real.reshape(NY // k, k, NX // k, k).sum(axis=(1, 3))
     cnt = good.sum(axis=(1, 3))
     s = np.where(good, b, 0).sum(axis=(1, 3))
     with np.errstate(invalid="ignore", divide="ignore"):
-        out = np.where(cnt >= min_frac * k * k, s / np.maximum(cnt, 1), np.nan)
+        out = np.where(cnt >= min_frac * avail, s / np.maximum(cnt, 1), np.nan)
     return out.astype("float32")

@@ -8,7 +8,10 @@ Each global daily file (0.02 deg, -180..180 lon, Kelvin) is cropped and
 converted to degC on the plotting grids, and two small files are written:
 
     obs/sst_leo/leosst_full_YYYYMMDD.nc   domain, binned to grid_dx_full
-    obs/sst_leo/leosst_zoom_YYYYMMDD.nc   zoom box, binned to grid_dx_zoom
+    obs/sst_leo/leosst_zs_YYYYMMDD.nc     generous "zoom store" box (zoom_store in the
+                                          config) at grid_dx_zoom; the plotted zoom box is
+                                          cut from it at load time, so the zoom box can be
+                                          changed without downloading anything again
 
 Both files hold lon/lat (cell centres, 0-360) and sst (degC). Days already
 present are skipped, so the download is resume-safe.
@@ -40,8 +43,24 @@ ERDDAP_RATE_TRIES = 2      # ERDDAP: give up quickly on 429 and switch to the fi
 _state = {"rate_limited": 0, "erddap_block_until": 0.0}
 
 
-def sat_file(cfg, region: str, d: date) -> Path:
-    return cfg.obs_dir / f"leosst_{region}_{d:%Y%m%d}.nc"
+PRODUCTS = ("full", "zs")          # stored files; "zs" = zoom store
+
+
+def _product_grid(cfg, product: str):
+    return cfg.grid("full" if product == "full" else "zoomstore")
+
+
+def sat_file(cfg, product: str, d: date) -> Path:
+    return cfg.obs_dir / f"leosst_{product}_{d:%Y%m%d}.nc"
+
+
+def _have(cfg, product: str, d: date) -> bool:
+    f = sat_file(cfg, product, d)
+    return f.exists() and f.stat().st_size > 0
+
+
+def missing_products(cfg, d: date):
+    return [p for p in PRODUCTS if not _have(cfg, p, d)]
 
 
 def day_url(cfg, d: date, template: str) -> str:
@@ -121,10 +140,9 @@ def _write(path: Path, grid, sst):
     tmp.replace(path)
 
 
-def subset_raw(raw: Path, cfg, out_full: Path, out_zoom: Path):
-    """Crop the global file to the full and zoom grids; write degC files."""
+def subset_raw(raw: Path, cfg, outs: dict):
+    """Crop the global file to the grid of each product in outs {product: path}; write degC files."""
     import xarray as xr
-    gfull, gzoom = cfg.grid("full"), cfg.grid("zoom")
     ds = xr.open_dataset(str(raw))
     try:
         lat = ds["lat"].values
@@ -132,7 +150,8 @@ def subset_raw(raw: Path, cfg, out_full: Path, out_zoom: Path):
         lon360 = np.where(lon < 0, lon + 360.0, lon)
         order = np.argsort(lon360)
         lon_s = lon360[order]
-        for grid, out in ((gfull, out_full), (gzoom, out_zoom)):
+        for prod, out in outs.items():
+            grid = _product_grid(cfg, prod)
             h = grid.dx / 2
             lat_i = np.flatnonzero((lat >= grid.lat[0] - h) & (lat <= grid.lat[-1] + h))
             lon_i = np.flatnonzero((lon_s >= grid.lon[0] - h) & (lon_s <= grid.lon[-1] + h))
@@ -186,19 +205,19 @@ def _read_erddap_segment(path: Path):
     return np.where(lon < 0, lon + 360.0, lon), lat, arr
 
 
-def download_day_erddap(cfg, d: date) -> str:
+def download_day_erddap(cfg, d: date, products) -> str:
     """Download only the needed sub-rectangles from ERDDAP and bin them."""
-    out_full, out_zoom = sat_file(cfg, "full", d), sat_file(cfg, "zoom", d)
     tmp_dir = cfg.obs_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     retries = int(cfg.sat.get("retries", 3))
     hits0 = _state["rate_limited"]
-    for grid, out in ((cfg.grid("full"), out_full), (cfg.grid("zoom"), out_zoom)):
+    for prod in products:
+        grid, out = _product_grid(cfg, prod), sat_file(cfg, prod, d)
         segs, lat_lo, lat_hi = _erddap_segments(grid)
         files = []
         try:
             for k, (lo, hi) in enumerate(segs):
-                f = tmp_dir / f"erddap_{grid.name}_{d:%Y%m%d}_{k}.nc"
+                f = tmp_dir / f"erddap_{prod}_{d:%Y%m%d}_{k}.nc"
                 if not _fetch(erddap_url(cfg, d, lat_lo, lat_hi, lo, hi), f, retries, resume=False,
                                rate_tries=ERDDAP_RATE_TRIES):
                     if _state["rate_limited"] > hits0:
@@ -215,7 +234,7 @@ def download_day_erddap(cfg, d: date) -> str:
                 sst = np.concatenate([p[2] for p in parts], axis=1)
                 _write(out, grid, bin_to_grid(lon, lat, sst, grid))
         except Exception as exc:
-            print(f"  {d:%Y%m%d}: erddap {grid.name} failed: {exc}", flush=True)
+            print(f"  {d:%Y%m%d}: erddap {prod} failed: {exc}", flush=True)
             return "fail"
         finally:
             for f in files:
@@ -225,13 +244,12 @@ def download_day_erddap(cfg, d: date) -> str:
 
 def download_day(cfg, d: date) -> str:
     """Download + subset one day. Returns 'ok', 'skip' or 'fail'."""
-    out_full, out_zoom = sat_file(cfg, "full", d), sat_file(cfg, "zoom", d)
-    if (out_full.exists() and out_full.stat().st_size > 0
-            and out_zoom.exists() and out_zoom.stat().st_size > 0):
+    todo = missing_products(cfg, d)           # only fetch what is not on disk yet
+    if not todo:
         return "skip"
     if (str(cfg.sat.get("source", "erddap")).lower() == "erddap"
             and time.time() >= _state["erddap_block_until"]):
-        r = download_day_erddap(cfg, d)
+        r = download_day_erddap(cfg, d, todo)
         if r == "ok" or not cfg.sat.get("fallback_to_files", True):
             return r
         print(f"  {d:%Y%m%d}: ERDDAP failed, falling back to the global file.", flush=True)
@@ -247,7 +265,7 @@ def download_day(cfg, d: date) -> str:
         return "fail"
     try:
         with _HDF_LOCK:
-            subset_raw(raw, cfg, out_full, out_zoom)
+            subset_raw(raw, cfg, {p: sat_file(cfg, p, d) for p in todo})
     except Exception as exc:
         print(f"  {d:%Y%m%d}: subset failed: {exc}", flush=True)
         return "fail"
@@ -281,17 +299,34 @@ def run_download(cfg):
     return failed
 
 
+def _cut(store_axis, want_axis, dx):
+    """Index slice of store_axis (cell centres) matching want_axis exactly."""
+    i0 = int(np.argmin(np.abs(store_axis - want_axis[0])))
+    sl = slice(i0, i0 + want_axis.size)
+    got = store_axis[sl]
+    if got.size != want_axis.size or np.max(np.abs(got - want_axis)) > 0.05 * dx:
+        raise ValueError("requested grid is not contained in the stored satellite grid "
+                         "(zoom box outside zoom_store, or not on the 0.02 deg lattice)")
+    return sl
+
+
 def load_day(cfg, region: str, d: date):
-    """Return the (ny, nx) satellite SST array for a day, or None if absent."""
+    """(ny, nx) satellite SST on the 'full' or 'zoom' plotting grid, or None if absent."""
     import xarray as xr
-    f = sat_file(cfg, region, d)
-    if not (f.exists() and f.stat().st_size > 0):
+    prod = "full" if region == "full" else "zs"
+    f = sat_file(cfg, prod, d)
+    if not _have(cfg, prod, d):
         return None
     ds = xr.open_dataset(str(f))
     try:
-        return ds["sst"].values.astype("float32")
+        sst = ds["sst"].values.astype("float32")
+        lat, lon = ds["lat"].values.astype("float64"), ds["lon"].values.astype("float64")
     finally:
         ds.close()
+    if region == "full":
+        return sst
+    g = cfg.grid("zoom")
+    return sst[_cut(lat, g.lat, g.dx), :][:, _cut(lon, g.lon, g.dx)]
 
 
 def main(argv=None):

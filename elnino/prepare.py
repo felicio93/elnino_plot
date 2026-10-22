@@ -27,11 +27,19 @@ def check_arrow_ratios(cfg: Config):
     for fine, coarse in (("full", "arrows_full"), ("zoom", "arrows_zoom")):
         gf, gc = cfg.grid(fine), cfg.grid(coarse)
         ratio = gc.dx / gf.dx
-        k = int(round(ratio))
-        if abs(ratio - k) > 1e-6 or gf.shape[0] % k or gf.shape[1] % k:
+        if abs(ratio - round(ratio)) > 1e-6 or round(ratio) < 1:
             raise ValueError(
                 f"arrow spacing {gc.dx} must be an integer multiple of the "
-                f"{fine} grid spacing {gf.dx} and divide its {gf.shape} cells evenly")
+                f"{fine} grid spacing {gf.dx}")
+
+
+def grid_signature(cfg: Config) -> str:
+    """Identifies the plotting grids; the cache is only valid for the grids it was built for."""
+    parts = []
+    for n in ("full", "zoom"):
+        g = cfg.grid(n)
+        parts.append(f"{n}:{g.shape}:{g.extent[0]:.4f},{g.extent[1]:.4f},{g.extent[2]:.4f},{g.extent[3]:.4f}")
+    return "|".join(parts)
 
 
 def run_prepare(cfg: Config):
@@ -63,12 +71,15 @@ def run_prepare(cfg: Config):
     print(f"  coastal band: {int(mask.any(axis=1).sum())} latitude rows, "
           f"{int(mask.sum())} cells", flush=True)
     np.savez(fields_path(cfg), depth_full=dgrid["full"], depth_zoom=dgrid["zoom"],
-             coast_mask=mask)
+             coast_mask=mask, signature=np.array(grid_signature(cfg)))
     print(f"Prepare complete -> {cfg.cache_dir}", flush=True)
 
 
 def load_cache(cfg: Config):
     """Return (weights dict, depth dict, coast_mask) from the cache."""
-    W = {n: mesh.Weights.load(weights_path(cfg, n)) for n in ("full", "zoom")}
     z = np.load(fields_path(cfg))
+    if "signature" not in z.files or str(z["signature"]) != grid_signature(cfg):
+        raise RuntimeError("the cache in " + str(cfg.cache_dir) + " was built for different "
+                           "grids (domain/zoom/grid_dx changed): re-run `prepare`.")
+    W = {n: mesh.Weights.load(weights_path(cfg, n)) for n in ("full", "zoom")}
     return W, {"full": z["depth_full"], "zoom": z["depth_zoom"]}, z["coast_mask"]

@@ -9,6 +9,26 @@ from .config import PLOT_TYPES
 
 LAND = "0.80"
 
+# Isobath line styles: 0 m is the coastline of the model mesh.
+ISOBATH_STYLE = {0: dict(linewidth=0.9, linestyle="-", alpha=0.9),
+                 200: dict(linewidth=0.6, linestyle="-", alpha=0.75),
+                 2000: dict(linewidth=0.7, linestyle="--", alpha=0.75)}
+
+
+def draw_isobaths(ax, grid, depth, levels):
+    """Draw each isobath level (m, positive down) from the regridded bathymetry."""
+    if depth is None:
+        return
+    # cells outside the mesh are land: give them a negative depth so the 0 m contour
+    # follows the coast even where the mesh has no land nodes
+    d = np.where(np.isfinite(depth), depth, -1.0)
+    for lev in levels:
+        lev = float(lev)
+        if not (d.min() < lev < d.max()):
+            continue
+        style = ISOBATH_STYLE.get(int(lev), dict(linewidth=0.5, linestyle="-", alpha=0.7))
+        ax.contour(grid.lon, grid.lat, d, levels=[lev], colors="k", **style)
+
 
 def fmt_lon(v, _pos=None):
     v = ((v + 180.0) % 360.0) - 180.0
@@ -73,7 +93,7 @@ def render_frame(cfg, ptype, d: date, grid, model, sat, depth=None,
 
     cmap = plt.get_cmap(s.get("cmap", "jet")).with_extremes(bad=LAND)
     ext = grid.extent
-    isob = s.get("isobaths_full" if region == "full" else "isobaths_zoom") or []
+    isob = s.get("isobaths") or []
 
     ims = []
     for ax, field in ((ax1, model), (ax2, sat)):
@@ -82,9 +102,7 @@ def render_frame(cfg, ptype, d: date, grid, model, sat, depth=None,
                        cmap=cmap, vmin=lim["vmin"], vmax=lim["vmax"],
                        aspect="auto", interpolation="nearest")
         ims.append(im)
-        if isob and depth is not None:
-            ax.contour(grid.lon, grid.lat, depth, levels=[float(v) for v in isob],
-                       colors="k", linewidths=0.5, alpha=0.6)
+        draw_isobaths(ax, grid, depth, isob)
         ax.set_xlim(box["lon_min"], box["lon_max"])
         ax.set_ylim(box["lat_min"], box["lat_max"])
         ax.xaxis.set_major_locator(MaxNLocator(6 if region == "full" else 5, steps=[1, 2, 5, 10]))
@@ -103,7 +121,7 @@ def render_frame(cfg, ptype, d: date, grid, model, sat, depth=None,
         m = np.isfinite(spd) & (spd > float(cur.get("min_speed", 0.0)))
         if m.any():
             q = ax1.quiver(X[m], Y[m], u[m], v[m], angles="xy", scale_units="xy",
-                           scale=scale, width=float(cur.get("width", 0.0014)),
+                           scale=scale, width=float(cur.get("width_full" if region == "full" else "width_zoom", 0.0014)),
                            color=cur.get("color", "k"), pivot="mid", zorder=5)
             ref = float(cur.get("ref_speed", 0.5))
             ax1.quiverkey(q, 0.88, 1.035, ref, f"{ref:g} m/s", labelpos="E",
@@ -116,6 +134,11 @@ def render_frame(cfg, ptype, d: date, grid, model, sat, depth=None,
     cb.set_label("SST (°C)", fontsize=10)
     fig.text(0.5, 1 - 0.18 / Hi, f"{d:%Y-%m-%d}", ha="center", va="top",
              fontsize=14, fontweight="bold")
+
+    if isob:
+        names = ", ".join(f"{int(v)} m" for v in isob)
+        fig.text(0.012, 0.012, f"Isobaths: {names} (0 m = coast)", fontsize=8, va="bottom",
+                 color="0.25")
 
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

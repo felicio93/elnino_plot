@@ -13,23 +13,28 @@ One frame per day, model and satellite side by side with a shared colour bar.
 | `figures/hovmoller_equator.png` | 2°S–2°N SST, longitude vs date, model and satellite |
 | `figures/hovmoller_coast.png` | US West Coast coastal-band SST, latitude vs date |
 | `figures/skill_timeseries.png`, `daily_stats.csv` | daily bias / RMSE / correlation (full domain and zoom) |
-| `obs/sst_leo/` | satellite SST subset to the plotting grids |
+| `obs/sst_leo/` | satellite SST: `leosst_full_*` (domain, 0.1°) and `leosst_zs_*` ("zoom store", 0.02°, larger than the zoom box) |
 | `stats/` | per-day statistics the summary figures are built from |
 
-Plot types: `full` (whole domain), `zoom` (Santa Maria → south of Tijuana),
+Plot types: `full` (whole domain), `zoom` (5° square: Carmel-by-the-Sea → south of Tijuana),
 `full_cur` and `zoom_cur` (same, with surface-current arrows on the model panel).
 
 ## How it works
 
 * **Satellite**: NOAA/STAR ACSPO L3S-LEO-DY daily 0.02° SST (same product as `stofs_ak_workflow`),
   downloaded on the DTN, converted to °C and block-averaged onto the plotting grids
-  (0.1° full domain, 0.02° zoom). ~430 MB per day is downloaded and deleted after subsetting.
+  (0.1° full domain, 0.02° zoom store). Source: NOAA CoastWatch ERDDAP server-side subsetting (~100 MB/day,
+  identical values), falling back to the 433 MB global file when ERDDAP rate-limits or errors (HTTP 429/502/503/504).
 * **Model**: surface layer (last vertical index) of `temperature_N.nc`, mean of the 24 hourly outputs of the day
   (`sst.match: noon` uses the output nearest 12Z instead). Day D is in stack `D - model_start + 1`.
   Currents come from the surface layer of `horizontalVel{X,Y}_N.nc`, daily mean, block-averaged to the arrow grid.
 * **Regridding**: the unstructured mesh (quads split into triangles) is interpolated to the regular grids with
   barycentric weights computed once by the `prepare` job and cached.
   Model and satellite sit on identical grids, so both panels and all statistics are cell-for-cell comparable.
+* All panels show the 0 m (coast), 200 m and 2000 m isobaths from the model bathymetry (`sst.isobaths`).
+* The zoom box is cut from the stored 0.02° "zoom store" area, so it can be moved anywhere inside `zoom_store`
+  (config) without downloading again; after changing `zoom`/`domain`/`grid_dx_*` re-run `prepare`
+  (the cache is checked and a stale one is refused) and delete `frames/` and `stats/`.
 * Arrow length is proportional to speed with a fixed scale for every frame (`currents.scale_*`).
 * Skill/indices use only cells where both model and satellite are valid and are area-weighted (cos latitude).
   The "indices" are absolute area-mean SST: no climatology exists for the model, so no anomalies are computed.
