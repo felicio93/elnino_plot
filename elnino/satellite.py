@@ -35,7 +35,9 @@ VAR = "sea_surface_temperature"
 # every read/write of a netCDF file is serialized through this lock.
 _HDF_LOCK = threading.Lock()
 
-RATE_LIMIT_TRIES = 12      # max attempts for a request that keeps getting HTTP 429/503
+RATE_LIMIT_TRIES = 12      # max attempts for a request that keeps getting HTTP 429/503 (file server)
+ERDDAP_RATE_TRIES = 2      # ERDDAP: give up quickly on 429 and switch to the file route
+_state = {"rate_limited": 0, "erddap_block_until": 0.0}
 
 
 def sat_file(cfg, region: str, d: date) -> Path:
@@ -47,7 +49,8 @@ def day_url(cfg, d: date, template: str) -> str:
     return f"{base}/{d.year}/{d:%j}/{template.format(ymd=f'{d:%Y%m%d}')}"
 
 
-def _fetch(url: str, dest: Path, retries: int, resume: bool = True) -> bool:
+def _fetch(url: str, dest: Path, retries: int, resume: bool = True,
+           rate_tries: int = None) -> bool:
     """Download url to dest. With resume, a partial file is continued between attempts
     (file server only; ERDDAP responses are generated on the fly and always restart)."""
     attempt = 0
@@ -90,10 +93,11 @@ def _fetch(url: str, dest: Path, retries: int, resume: bool = True) -> bool:
                 ra = getattr(exc, "headers", None) and exc.headers.get("Retry-After")
                 wait = int(ra) if ra and str(ra).isdigit() else min(600, 60 * attempt)
                 wait = min(600, wait) * (0.8 + 0.4 * random.random())
+                _state["rate_limited"] += 1
+                if attempt >= (rate_tries or RATE_LIMIT_TRIES):
+                    break
                 print(f"      rate limited; waiting {wait:.0f}s", flush=True)
                 time.sleep(wait)
-                if attempt >= RATE_LIMIT_TRIES:
-                    break
                 retries = max(retries, attempt + 1)   # waiting is not a failure: keep trying
                 continue
             if attempt < retries:
@@ -188,13 +192,20 @@ def download_day_erddap(cfg, d: date) -> str:
     tmp_dir = cfg.obs_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     retries = int(cfg.sat.get("retries", 3))
+    hits0 = _state["rate_limited"]
     for grid, out in ((cfg.grid("full"), out_full), (cfg.grid("zoom"), out_zoom)):
         segs, lat_lo, lat_hi = _erddap_segments(grid)
         files = []
         try:
             for k, (lo, hi) in enumerate(segs):
                 f = tmp_dir / f"erddap_{grid.name}_{d:%Y%m%d}_{k}.nc"
-                if not _fetch(erddap_url(cfg, d, lat_lo, lat_hi, lo, hi), f, retries, resume=False):
+                if not _fetch(erddap_url(cfg, d, lat_lo, lat_hi, lo, hi), f, retries, resume=False,
+                               rate_tries=ERDDAP_RATE_TRIES):
+                    if _state["rate_limited"] > hits0:
+                        cool = float(cfg.sat.get("erddap_cooldown_min", 30))
+                        _state["erddap_block_until"] = time.time() + 60 * cool
+                        print(f"  ERDDAP is rate limiting this host: using the file server "
+                              f"for the next {cool:g} min.", flush=True)
                     return "fail"
                 files.append(f)
             with _HDF_LOCK:
@@ -218,7 +229,8 @@ def download_day(cfg, d: date) -> str:
     if (out_full.exists() and out_full.stat().st_size > 0
             and out_zoom.exists() and out_zoom.stat().st_size > 0):
         return "skip"
-    if str(cfg.sat.get("source", "erddap")).lower() == "erddap":
+    if (str(cfg.sat.get("source", "erddap")).lower() == "erddap"
+            and time.time() >= _state["erddap_block_until"]):
         r = download_day_erddap(cfg, d)
         if r == "ok" or not cfg.sat.get("fallback_to_files", True):
             return r
