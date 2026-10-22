@@ -12,6 +12,7 @@ present are skipped, so the download is resume-safe.
 
 import argparse
 import sys
+import threading
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -24,6 +25,10 @@ from .config import load_config
 from .satellite_grid import bin_to_grid
 
 VAR = "sea_surface_temperature"
+
+# The netCDF4/HDF5 library is not thread-safe: downloads run in parallel but
+# every read/write of a netCDF file is serialized through this lock.
+_HDF_LOCK = threading.Lock()
 
 
 def sat_file(cfg, region: str, d: date) -> Path:
@@ -43,12 +48,16 @@ def _fetch(url: str, dest: Path, retries: int) -> bool:
             req = urllib.request.Request(url, headers={"Range": f"bytes={have}-"} if have else {})
             with urllib.request.urlopen(req, timeout=120) as r:
                 resumed = have > 0 and r.status == 206
+                size = int(r.headers.get("Content-Length", -1))
                 with open(dest, "ab" if resumed else "wb") as f:
                     while True:
                         chunk = r.read(1 << 20)
                         if not chunk:
                             break
                         f.write(chunk)
+            expect = size + (have if resumed else 0)
+            if size >= 0 and dest.stat().st_size != expect:
+                raise IOError(f"truncated download: {dest.stat().st_size} of {expect} bytes")
             return dest.stat().st_size > 0
         except Exception as exc:                      # 404, timeouts, resets
             code = getattr(exc, "code", None)
@@ -122,7 +131,8 @@ def download_day(cfg, d: date) -> str:
     if not got:
         return "fail"
     try:
-        subset_raw(raw, cfg, out_full, out_zoom)
+        with _HDF_LOCK:
+            subset_raw(raw, cfg, out_full, out_zoom)
     except Exception as exc:
         print(f"  {d:%Y%m%d}: subset failed: {exc}", flush=True)
         return "fail"
