@@ -38,7 +38,8 @@ sst:
   cmap: jet
   full: {vmin: 0.0,  vmax: 32.0}
   zoom: {vmin: 12.0, vmax: 25.0}
-  isobaths: [0, 200, 2000]      # metres, drawn on every panel; 0 = coastline
+  isobaths_full: [0]            # metres; 0 = coastline of the model mesh
+  isobaths_zoom: [0, 200, 2000]
   dpi: 100
   panel_width_full: 9.0         # inches per panel (height follows from domain aspect)
   panel_width_zoom: 6.0

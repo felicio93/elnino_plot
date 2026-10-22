@@ -31,7 +31,7 @@ Plot types: `full` (whole domain), `zoom` (5° square: Carmel-by-the-Sea → sou
 * **Regridding**: the unstructured mesh (quads split into triangles) is interpolated to the regular grids with
   barycentric weights computed once by the `prepare` job and cached.
   Model and satellite sit on identical grids, so both panels and all statistics are cell-for-cell comparable.
-* All panels show the 0 m (coast), 200 m and 2000 m isobaths from the model bathymetry (`sst.isobaths`).
+* Full-domain panels show the 0 m isobath (coast) and zoom panels also 200 m and 2000 m, from the model bathymetry (`sst.isobaths_full` and `sst.isobaths_zoom`).
 * The zoom box is cut from the stored 0.02° "zoom store" area, so it can be moved anywhere inside `zoom_store`
   (config) without downloading again; after changing `zoom`/`domain`/`grid_dx_*` re-run `prepare`
   (the cache is checked and a stale one is refused) and delete `frames/` and `stats/`.

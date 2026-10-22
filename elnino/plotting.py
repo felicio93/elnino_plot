@@ -93,7 +93,7 @@ def render_frame(cfg, ptype, d: date, grid, model, sat, depth=None,
 
     cmap = plt.get_cmap(s.get("cmap", "jet")).with_extremes(bad=LAND)
     ext = grid.extent
-    isob = s.get("isobaths") or []
+    isob = s.get("isobaths_full" if region == "full" else "isobaths_zoom") or []
 
     ims = []
     for ax, field in ((ax1, model), (ax2, sat)):
