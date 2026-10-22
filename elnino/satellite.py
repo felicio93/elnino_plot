@@ -15,6 +15,7 @@ present are skipped, so the download is resume-safe.
 """
 
 import argparse
+import random
 import sys
 import threading
 import time
@@ -34,6 +35,8 @@ VAR = "sea_surface_temperature"
 # every read/write of a netCDF file is serialized through this lock.
 _HDF_LOCK = threading.Lock()
 
+RATE_LIMIT_TRIES = 12      # max attempts for a request that keeps getting HTTP 429/503
+
 
 def sat_file(cfg, region: str, d: date) -> Path:
     return cfg.obs_dir / f"leosst_{region}_{d:%Y%m%d}.nc"
@@ -47,7 +50,9 @@ def day_url(cfg, d: date, template: str) -> str:
 def _fetch(url: str, dest: Path, retries: int, resume: bool = True) -> bool:
     """Download url to dest. With resume, a partial file is continued between attempts
     (file server only; ERDDAP responses are generated on the fly and always restart)."""
-    for attempt in range(1, retries + 1):
+    attempt = 0
+    while attempt < retries:
+        attempt += 1
         try:
             if not resume:
                 dest.unlink(missing_ok=True)
@@ -81,6 +86,16 @@ def _fetch(url: str, dest: Path, retries: int, resume: bool = True) -> bool:
             if code == 404:
                 dest.unlink(missing_ok=True)
                 return False
+            if code in (429, 503):                    # rate limited / busy: back off, don't give up early
+                ra = getattr(exc, "headers", None) and exc.headers.get("Retry-After")
+                wait = int(ra) if ra and str(ra).isdigit() else min(600, 60 * attempt)
+                wait = min(600, wait) * (0.8 + 0.4 * random.random())
+                print(f"      rate limited; waiting {wait:.0f}s", flush=True)
+                time.sleep(wait)
+                if attempt >= RATE_LIMIT_TRIES:
+                    break
+                retries = max(retries, attempt + 1)   # waiting is not a failure: keep trying
+                continue
             if attempt < retries:
                 time.sleep(5 * attempt)
     dest.unlink(missing_ok=True)

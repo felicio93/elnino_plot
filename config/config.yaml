@@ -94,7 +94,7 @@ satellite:
   # {ymd} = YYYYMMDD ; versions tried in order
   file_templates:
     - "{ymd}120000-STAR-L3S_GHRSST-SSTsubskin-LEO_Daily-ACSPO_V2.81-v02.0-fv01.0.nc"
-  workers: 4
+  workers: 2                    # keep low: NOAA rate-limits (HTTP 429) aggressive clients
   retries: 3
 
 # --- slurm / environment ---------------------------------------------------------------------
