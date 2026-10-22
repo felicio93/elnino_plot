@@ -247,8 +247,12 @@ def download_day(cfg, d: date) -> str:
     todo = missing_products(cfg, d)           # only fetch what is not on disk yet
     if not todo:
         return "skip"
-    if (str(cfg.sat.get("source", "erddap")).lower() == "erddap"
-            and time.time() >= _state["erddap_block_until"]):
+    use_erddap = str(cfg.sat.get("source", "erddap")).lower() == "erddap"
+    if use_erddap and not cfg.sat.get("fallback_to_files", True):
+        wait = _state["erddap_block_until"] - time.time()
+        if wait > 0:                                  # no fallback: wait out the cooldown
+            time.sleep(wait)
+    if use_erddap and time.time() >= _state["erddap_block_until"]:
         r = download_day_erddap(cfg, d, todo)
         if r == "ok" or not cfg.sat.get("fallback_to_files", True):
             return r
