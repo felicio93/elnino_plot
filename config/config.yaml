@@ -1,0 +1,106 @@
+# =============================================================================
+# elnino_plot configuration — SCHISM (STOFS-3D Pacific) vs satellite SST, 2023
+# =============================================================================
+# All longitudes use the 0-360 convention, like the model mesh.
+
+# --- model run ---------------------------------------------------------------
+outputs_dir: /work2/noaa/nosofs/daneshva/RUN300b/outputs   # out2d_N.nc, temperature_N.nc, horizontalVel{X,Y}_N.nc
+model_start_date: 2022-12-01      # base date of the run; stack N holds model day N-1 (hourly, 01:00..24:00)
+
+# --- period to plot ------------------------------------------------------------
+plot_start: 2023-01-01
+plot_end:   2023-12-31
+
+# --- output root -----------------------------------------------------------------
+out_dir: /work2/noaa/nos-surge/felicioc/STOFS_Pacific/elnino2023
+# Sub-directories created under out_dir: obs/ cache/ frames/ stats/ figures/
+# animations/ logs/
+
+# --- domain (from out2d_100.nc) --------------------------------------------------
+domain: {lon_min: 93.0, lon_max: 290.0, lat_min: -33.0, lat_max: 67.0}   # integer multiple of grid_dx_full and currents.dx_full
+
+# Zoomed view: top-left near Santa Maria CA, bottom-right south of Tijuana MX.
+zoom:   {lon_min: 239.5, lon_max: 243.0, lat_min: 31.5, lat_max: 35.0}
+
+# --- regular grids used for plotting (degrees) ----------------------------------
+# Both satellite and model are put on the SAME regular grid so the panels match.
+grid_dx_full: 0.1       # full-domain panels (satellite 0.02 deg is block-averaged to this)
+grid_dx_zoom: 0.02      # zoom panels (satellite native resolution)
+
+# --- SST panels ---------------------------------------------------------------------
+sst:
+  match: daily_mean             # daily_mean of the 24 hourly model outputs | noon (13:00 nearest to 12Z)
+  cmap: jet
+  full: {vmin: 0.0,  vmax: 32.0}
+  zoom: {vmin: 12.0, vmax: 25.0}
+  isobaths_full: []             # e.g. [2000]
+  isobaths_zoom: [200]
+  dpi: 100
+  panel_width_full: 9.0         # inches per panel (height follows from domain aspect)
+  panel_width_zoom: 6.0
+  jpeg_quality: 90
+
+# --- current vectors (model panel only) --------------------------------------------
+currents:
+  layer: surface
+  dx_full: 1.0                  # arrow spacing, degrees
+  dx_zoom: 0.1
+  # Arrow length (data units, deg) = speed / scale; fixed for all frames so arrow
+  # size is comparable day to day. Lower scale -> longer arrows.
+  scale_full: 0.5               # 1 m/s -> 2 deg
+  scale_zoom: 3.3               # 1 m/s -> ~0.3 deg
+  ref_speed: 0.5                # reference arrow in the legend, m/s
+  color: k
+  width: 0.0014                 # shaft width, fraction of the axes width
+  min_speed: 0.0                # arrows slower than this (m/s) are not drawn
+
+# --- indices / transects used by the summary figures ------------------------------------
+regions:
+  nino34: {lon_min: 190.0, lon_max: 240.0, lat_min: -5.0, lat_max: 5.0}
+  nino3:  {lon_min: 210.0, lon_max: 270.0, lat_min: -5.0, lat_max: 5.0}
+  nino12: {lon_min: 270.0, lon_max: 280.0, lat_min: -10.0, lat_max: 0.0}
+equator_hovmoller: {lat_min: -2.0, lat_max: 2.0}
+coast_hovmoller:
+  lat_min: 24.0
+  lat_max: 49.0
+  search_lon_min: 225.0         # coastline is searched eastward from here
+  search_lon_max: 255.0
+  band_width_deg: 1.0           # ocean band offshore of the coast (~100 km)
+
+# --- summary figures (from the daily stats) -------------------------------------------
+figures:
+  eq_vlim:    [20.0, 31.0]      # equatorial Hovmoller colour range, degC
+  coast_vlim: [10.0, 26.0]      # coastal Hovmoller colour range, degC
+  cmap: jet
+  dpi: 150
+  baseline_days: 7              # "change since start" uses the mean of the first N days
+
+# --- animations -----------------------------------------------------------------------
+animation:
+  fps: 6
+  gif_max_width: 1400           # GIF frames are down-scaled to this width (px); MP4 keeps full size
+  make_gif: true
+  make_mp4: true
+
+# --- satellite download (run on the DTN) ----------------------------------------------
+satellite:
+  base_url: https://coastwatch.noaa.gov/pub/socd2/coastwatch/sst/ran/l3s/leo/daily
+  # {ymd} = YYYYMMDD ; versions tried in order
+  file_templates:
+    - "{ymd}120000-STAR-L3S_GHRSST-SSTsubskin-LEO_Daily-ACSPO_V2.81-v02.0-fv01.0.nc"
+  workers: 4
+  retries: 3
+
+# --- slurm / environment ---------------------------------------------------------------------
+python: /work2/noaa/nos-surge/felicioc/envs/miniconda3/envs/swf_plot/bin/python
+repo_dir: null                  # defaults to the directory containing this repo (auto-detected)
+slurm:
+  account: nos-surge
+  partition: hercules-2
+  prepare_mem: 120G
+  prepare_walltime: "01:00:00"
+  day_mem: 32G
+  day_walltime: "01:30:00"
+  array_throttle: 40
+  finalize_mem: 24G
+  finalize_walltime: "02:00:00"

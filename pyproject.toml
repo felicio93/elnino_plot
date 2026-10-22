@@ -1,0 +1,16 @@
+[project]
+name = "elnino-plot"
+version = "0.1.0"
+description = "SCHISM vs satellite SST plots for the 2023 El Nino (STOFS-3D Pacific)"
+requires-python = ">=3.10"
+dependencies = ["numpy", "scipy", "xarray", "netCDF4", "matplotlib", "imageio", "pyyaml"]
+
+[project.optional-dependencies]
+mp4 = ["imageio-ffmpeg"]
+test = ["pytest"]
+
+[tool.setuptools]
+packages = ["elnino"]
+
+[tool.setuptools.package-data]
+elnino = ["templates/*.sbatch"]

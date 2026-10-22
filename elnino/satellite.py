@@ -1,0 +1,181 @@
+"""NOAA/STAR ACSPO L3S-LEO-DY satellite SST: download (DTN) and load.
+
+Each global daily file (0.02 deg, -180..180 lon, Kelvin) is cropped and
+converted to degC on the plotting grids, and two small files are written:
+
+    obs/sst_leo/leosst_full_YYYYMMDD.nc   domain, binned to grid_dx_full
+    obs/sst_leo/leosst_zoom_YYYYMMDD.nc   zoom box, binned to grid_dx_zoom
+
+Both files hold lon/lat (cell centres, 0-360) and sst (degC). Days already
+present are skipped, so the download is resume-safe.
+"""
+
+import argparse
+import sys
+import time
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date
+from pathlib import Path
+
+import numpy as np
+
+from .config import load_config
+from .satellite_grid import bin_to_grid
+
+VAR = "sea_surface_temperature"
+
+
+def sat_file(cfg, region: str, d: date) -> Path:
+    return cfg.obs_dir / f"leosst_{region}_{d:%Y%m%d}.nc"
+
+
+def day_url(cfg, d: date, template: str) -> str:
+    base = cfg.sat["base_url"].rstrip("/")
+    return f"{base}/{d.year}/{d:%j}/{template.format(ymd=f'{d:%Y%m%d}')}"
+
+
+def _fetch(url: str, dest: Path, retries: int) -> bool:
+    """Download url to dest, resuming a partial file between attempts."""
+    for attempt in range(1, retries + 1):
+        try:
+            have = dest.stat().st_size if dest.exists() else 0
+            req = urllib.request.Request(url, headers={"Range": f"bytes={have}-"} if have else {})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                resumed = have > 0 and r.status == 206
+                with open(dest, "ab" if resumed else "wb") as f:
+                    while True:
+                        chunk = r.read(1 << 20)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+            return dest.stat().st_size > 0
+        except Exception as exc:                      # 404, timeouts, resets
+            code = getattr(exc, "code", None)
+            if code == 416:                           # range past EOF: already complete
+                return dest.exists() and dest.stat().st_size > 0
+            if code == 404:
+                dest.unlink(missing_ok=True)
+                return False
+            if attempt < retries:
+                time.sleep(5 * attempt)
+    dest.unlink(missing_ok=True)
+    return False
+
+
+def _write(path: Path, grid, sst):
+    import xarray as xr
+    ds = xr.Dataset(
+        {"sst": (("lat", "lon"), sst.astype("float32"))},
+        coords={"lat": grid.lat.astype("float32"),
+                "lon": grid.lon.astype("float32")})
+    ds["sst"].attrs.update(units="degC", long_name="sea surface temperature")
+    ds["lon"].attrs.update(units="degrees_east")
+    ds["lat"].attrs.update(units="degrees_north")
+    enc = {"sst": {"zlib": True, "complevel": 4}}
+    tmp = path.with_suffix(".tmp")
+    ds.to_netcdf(tmp, encoding=enc)
+    tmp.replace(path)
+
+
+def subset_raw(raw: Path, cfg, out_full: Path, out_zoom: Path):
+    """Crop the global file to the full and zoom grids; write degC files."""
+    import xarray as xr
+    gfull, gzoom = cfg.grid("full"), cfg.grid("zoom")
+    ds = xr.open_dataset(str(raw))
+    try:
+        lat = ds["lat"].values
+        lon = ds["lon"].values
+        lon360 = np.where(lon < 0, lon + 360.0, lon)
+        order = np.argsort(lon360)
+        lon_s = lon360[order]
+        for grid, out in ((gfull, out_full), (gzoom, out_zoom)):
+            h = grid.dx / 2
+            lat_i = np.flatnonzero((lat >= grid.lat[0] - h) & (lat <= grid.lat[-1] + h))
+            lon_i = np.flatnonzero((lon_s >= grid.lon[0] - h) & (lon_s <= grid.lon[-1] + h))
+            if lat_i.size == 0 or lon_i.size == 0:
+                raise RuntimeError(f"{grid.name} grid outside the satellite file")
+            sub = ds[VAR].isel(time=0, lat=slice(lat_i[0], lat_i[-1] + 1))
+            arr = sub.values.astype("float32")                # (lat, lon) K, NaN = missing
+            arr = arr[:, order][:, lon_i]
+            sst_c = arr - 273.15
+            binned = bin_to_grid(lon_s[lon_i], lat[lat_i[0]:lat_i[-1] + 1], sst_c, grid)
+            _write(out, grid, binned)
+    finally:
+        ds.close()
+
+
+def download_day(cfg, d: date) -> str:
+    """Download + subset one day. Returns 'ok', 'skip' or 'fail'."""
+    out_full, out_zoom = sat_file(cfg, "full", d), sat_file(cfg, "zoom", d)
+    if (out_full.exists() and out_full.stat().st_size > 0
+            and out_zoom.exists() and out_zoom.stat().st_size > 0):
+        return "skip"
+    tmp_dir = cfg.obs_dir / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    raw = tmp_dir / f"raw_{d:%Y%m%d}.nc"
+    got = False
+    for tmpl in cfg.sat["file_templates"]:
+        if _fetch(day_url(cfg, d, tmpl), raw, int(cfg.sat.get("retries", 3))):
+            got = True
+            break
+    if not got:
+        return "fail"
+    try:
+        subset_raw(raw, cfg, out_full, out_zoom)
+    except Exception as exc:
+        print(f"  {d:%Y%m%d}: subset failed: {exc}", flush=True)
+        return "fail"
+    finally:
+        raw.unlink(missing_ok=True)
+    return "ok"
+
+
+def run_download(cfg):
+    cfg.obs_dir.mkdir(parents=True, exist_ok=True)
+    days = cfg.days()
+    workers = int(cfg.sat.get("workers", 4))
+    print(f"Satellite SST (ACSPO L3S-LEO-DY): {days[0]} -> {days[-1]}  "
+          f"({len(days)} days, {workers} workers)\n  output: {cfg.obs_dir}", flush=True)
+
+    def work(d):
+        try:
+            r = download_day(cfg, d)
+        except Exception as exc:
+            print(f"  {d:%Y%m%d}: ERROR {exc}", flush=True)
+            r = "fail"
+        print(f"  {d:%Y%m%d}: {r}", flush=True)
+        return d, r
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(pool.map(work, days))
+    failed = [f"{d:%Y%m%d}" for d, r in results if r == "fail"]
+    print(f"\nDone. ok/skip: {len(results) - len(failed)}  failed: {len(failed)}")
+    if failed:
+        print("  missing days: " + ", ".join(failed))
+    return failed
+
+
+def load_day(cfg, region: str, d: date):
+    """Return the (ny, nx) satellite SST array for a day, or None if absent."""
+    import xarray as xr
+    f = sat_file(cfg, region, d)
+    if not (f.exists() and f.stat().st_size > 0):
+        return None
+    ds = xr.open_dataset(str(f))
+    try:
+        return ds["sst"].values.astype("float32")
+    finally:
+        ds.close()
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Download satellite SST (run on the DTN)")
+    ap.add_argument("--config", required=True)
+    args = ap.parse_args(argv)
+    failed = run_download(load_config(args.config))
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
