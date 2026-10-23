@@ -14,6 +14,8 @@ One frame per day, model and satellite side by side with a shared colour bar.
 | `figures/hovmoller_coast.png` | US West Coast coastal-band SST, latitude vs date |
 | `figures/skill_timeseries.png`, `daily_stats.csv` | daily bias / RMSE / correlation (full domain and zoom) |
 | `obs/sst_leo/` | satellite SST: `leosst_full_*` (domain, 0.1°) and `leosst_zs_*` ("zoom store", 0.02°, larger than the zoom box) |
+| `figures/domain_map.png` | model domain bathymetry with the Niño 3.4 / 3 / 1+2 boxes (blue) and the zoom box (red) |
+| `figures/zoom_map.png` | zoom area: mesh bathymetry, mesh triangles (thin white lines) and nearby cities |
 | `stats/` | per-day statistics the summary figures are built from |
 
 Plot types: `full` (whole domain), `zoom` (5° square: Carmel-by-the-Sea → south of Tijuana),
@@ -63,6 +65,14 @@ Test one day before launching the whole year (after `prepare`):
 
 ```bash
 $PY -m elnino --config config/config.yaml day --date 20230115
+```
+
+Reference maps (after `prepare`; `map-zoom` reads the mesh from `out2d`, so use a compute node if it is slow):
+
+```bash
+$PY -m elnino --config config/config.yaml map-domain
+$PY -m elnino --config config/config.yaml map-zoom
+$PY -m elnino --config config/config.yaml maps        # both
 ```
 
 ### MP4 needs ffmpeg

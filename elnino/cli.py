@@ -22,6 +22,9 @@ def main(argv=None):
     p.add_argument("--force", action="store_true")
     p.add_argument("--types", nargs="+", choices=list(PLOT_TYPES))
     p = sub.add_parser("figures", help="summary figures from the daily stats")
+    sub.add_parser("map-domain", help="map of the model domain with the Niño and zoom boxes")
+    sub.add_parser("map-zoom", help="map of the zoom area with the mesh, bathymetry and cities")
+    sub.add_parser("maps", help="both maps")
     p = sub.add_parser("animate", help="GIF + MP4 from the frames")
     p.add_argument("--type", required=True, choices=list(PLOT_TYPES))
     p = sub.add_parser("finalize", help="run one finalize task (figures or a plot type)")
@@ -46,6 +49,15 @@ def main(argv=None):
     elif args.cmd == "figures" or (args.cmd == "finalize" and args.task == "figures"):
         from .figures import run_figures
         run_figures(cfg)
+    elif args.cmd in ("map-domain", "maps"):
+        from .map_domain import run_domain_map
+        run_domain_map(cfg)
+        if args.cmd == "maps":
+            from .map_zoom import run_zoom_map
+            run_zoom_map(cfg)
+    elif args.cmd == "map-zoom":
+        from .map_zoom import run_zoom_map
+        run_zoom_map(cfg)
     elif args.cmd in ("animate", "finalize"):
         from .animate import run_animation
         run_animation(cfg, args.type if args.cmd == "animate" else args.task)

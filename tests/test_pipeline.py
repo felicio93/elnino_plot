@@ -153,3 +153,17 @@ def test_submit_dry_run(cfg, capsys):
     assert "prepare" in out and "finalize" in out
     day = (cfg.log_dir / "day.sbatch").read_text()
     assert "--array=1-3%" in day and "{{" not in day
+
+
+def test_unique_edges():
+    from elnino.map_zoom import unique_edges
+    e = unique_edges(np.array([[0, 1, 2], [0, 2, 3]], dtype="int32"))
+    assert len(e) == 5 and {tuple(r) for r in e.tolist()} == {(0, 1), (1, 2), (0, 2), (2, 3), (0, 3)}
+
+
+def test_maps(cfg):
+    from elnino.map_domain import run_domain_map
+    from elnino.map_zoom import run_zoom_map
+    cfg.raw.setdefault("maps", {})["dpi"] = 60
+    for f in (run_domain_map(cfg), run_zoom_map(cfg)):
+        assert f.exists() and f.stat().st_size > 5000

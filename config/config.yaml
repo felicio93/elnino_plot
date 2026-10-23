@@ -81,6 +81,14 @@ figures:
   dpi: 150
   baseline_days: 7              # "change since start" uses the mean of the first N days
 
+# --- reference maps (map-domain, map-zoom) ------------------------------------------------
+maps:
+  cmap: viridis_r
+  depth_levels: [0, 50, 200, 500, 1000, 2000, 3000, 4000, 5000, 6000, 8000]
+  dpi: 200
+  mesh_lines: true              # draw the mesh triangles on the zoom map
+  # cities: [[Tijuana, 32.53, -117.04], ...]   # name, lat, lon; default list is in map_zoom.py
+
 # --- animations -----------------------------------------------------------------------
 animation:
   fps: 6
