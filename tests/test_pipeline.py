@@ -167,3 +167,15 @@ def test_maps(cfg):
     cfg.raw.setdefault("maps", {})["dpi"] = 60
     for f in (run_domain_map(cfg), run_zoom_map(cfg)):
         assert f.exists() and f.stat().st_size > 5000
+
+
+def test_discrete_sst_norm():
+    import matplotlib.pyplot as plt
+    from elnino.plotting import sst_norm
+    cmap = plt.get_cmap("jet")
+    levels, norm = sst_norm({"vmin": 12.0, "vmax": 23.0, "step": 0.5}, cmap)
+    assert len(levels) == 23 and levels[0] == 12.0 and levels[-1] == 23.0
+    assert norm(12.2) == norm(12.4) != norm(12.6)       # same bin
+    assert norm(23.5) == norm(30.0)                     # above the max: one extend colour
+    levels, norm = sst_norm({"vmin": 0.0, "vmax": 32.0}, cmap)
+    assert levels is None and abs(norm(16.0) - 0.5) < 1e-9

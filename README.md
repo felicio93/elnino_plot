@@ -37,6 +37,7 @@ Plot types: `full` (whole domain), `zoom` (5° square: Carmel-by-the-Sea → sou
 * The zoom box is cut from the stored 0.02° "zoom store" area, so it can be moved anywhere inside `zoom_store`
   (config) without downloading again; after changing `zoom`/`domain`/`grid_dx_*` re-run `prepare`
   (the cache is checked and a stale one is refused) and delete `frames/` and `stats/`.
+* The zoom panels use discrete SST colours (`sst.zoom.step`, 0.5 °C bins over `vmin`–`vmax`); remove `step` for a continuous scale.
 * Arrow length is proportional to speed with a fixed scale for every frame (`currents.scale_*`).
 * Skill/indices use only cells where both model and satellite are valid and are area-weighted (cos latitude).
   The "indices" are absolute area-mean SST: no climatology exists for the model, so no anomalies are computed.

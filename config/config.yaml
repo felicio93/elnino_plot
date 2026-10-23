@@ -37,7 +37,7 @@ sst:
   match: daily_mean             # daily_mean of the 24 hourly model outputs | noon (13:00 nearest to 12Z)
   cmap: jet
   full: {vmin: 0.0,  vmax: 32.0}
-  zoom: {vmin: 12.0, vmax: 25.0}
+  zoom: {vmin: 12.0, vmax: 23.0, step: 0.5}   # step: discrete colour bins (degC); omit for continuous
   isobaths_full: [0]            # metres; 0 = coastline of the model mesh
   isobaths_zoom: [0, 200, 2000]
   dpi: 100

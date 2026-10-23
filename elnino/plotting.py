@@ -67,6 +67,18 @@ def make_layout(panel_w, panel_h, dpi, left=0.85, gap=0.6, top=0.95, bottom=0.7,
     return fig, ax1, ax2, cax, (Wi, Hi, top)
 
 
+def sst_norm(lim, cmap):
+    """(levels, norm) for the SST colours: discrete bins of width lim['step'] if given,
+    else (None, continuous vmin..vmax)."""
+    import matplotlib.colors as mcolors
+    step = lim.get("step")
+    if not step:
+        return None, mcolors.Normalize(vmin=lim["vmin"], vmax=lim["vmax"])
+    n = int(round((lim["vmax"] - lim["vmin"]) / float(step)))
+    levels = lim["vmin"] + float(step) * np.arange(n + 1)
+    return levels, mcolors.BoundaryNorm(levels, cmap.N, extend="both")
+
+
 def render_frame(cfg, ptype, d: date, grid, model, sat, depth=None,
                  arrows=None, out_path: Path = None):
     """Render one frame.
@@ -92,6 +104,7 @@ def render_frame(cfg, ptype, d: date, grid, model, sat, depth=None,
     fig, ax1, ax2, cax, (Wi, Hi, top) = make_layout(pw, ph, dpi)
 
     cmap = plt.get_cmap(s.get("cmap", "jet")).with_extremes(bad=LAND)
+    levels, norm = sst_norm(lim, cmap)
     ext = grid.extent
     isob = s.get("isobaths_full" if region == "full" else "isobaths_zoom") or []
 
@@ -99,8 +112,7 @@ def render_frame(cfg, ptype, d: date, grid, model, sat, depth=None,
     for ax, field in ((ax1, model), (ax2, sat)):
         ax.set_facecolor(LAND)
         im = ax.imshow(np.ma.masked_invalid(field), origin="lower", extent=ext,
-                       cmap=cmap, vmin=lim["vmin"], vmax=lim["vmax"],
-                       aspect="auto", interpolation="nearest")
+                       cmap=cmap, norm=norm, aspect="auto", interpolation="nearest")
         ims.append(im)
         draw_isobaths(ax, grid, depth, isob)
         ax.set_xlim(box["lon_min"], box["lon_max"])
@@ -131,6 +143,10 @@ def render_frame(cfg, ptype, d: date, grid, model, sat, depth=None,
                   + (" + surface currents" if with_cur else ""), fontsize=11)
     ax2.set_title("ACSPO L3S-LEO-DY SST", fontsize=11)
     cb = fig.colorbar(ims[0], cax=cax, extend="both")
+    if levels is not None:
+        tick = max(1.0, float(lim["step"]))             # label whole degrees, bins may be finer
+        cb.set_ticks(levels[np.isclose(((levels - levels[0]) / tick) % 1.0, 0)
+                            | np.isclose(((levels - levels[0]) / tick) % 1.0, 1)])
     cb.set_label("SST (°C)", fontsize=10)
     fig.text(0.5, 1 - 0.18 / Hi, f"{d:%Y-%m-%d}", ha="center", va="top",
              fontsize=14, fontweight="bold")
